@@ -1,0 +1,17 @@
+# Entorno virtual
+venv/
+__pycache__/
+
+# Archivos de PyInstaller
+build/
+dist/
+*.spec
+
+# Base de datos (si prefieres no versionarla, aunque para uso personal puede ser útil tenerla)
+# *.db
+# *.db-journal
+
+# Archivos específicos del editor/SO
+.vscode/
+*.DS_Store
+Thumbs.db
