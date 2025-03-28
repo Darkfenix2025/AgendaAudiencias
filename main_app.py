@@ -58,7 +58,7 @@ class AudienciaApp:
     def crear_widgets(self):
         # --- Configurar Imagen de Fondo ---
         try:
-            image_path = resource_path("assets/background.png") # Ajusta si tu imagen tiene otro nombre/extensión
+            image_path = resource_path("assets/logoLegalito01.png") # Ajusta si tu imagen tiene otro nombre/extensión
             bg_image_pil = Image.open(image_path)
             # Opcional: Redimensionar si es necesario para ajustarse mejor
             # desired_width = 850
