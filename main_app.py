@@ -2,12 +2,28 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from tkcalendar import Calendar # Ya no necesitamos DateEntry aquí
+from PIL import Image, ImageTk
 import database as db # Importamos nuestro módulo de base de datos
 import datetime
 import threading
 import time
 import webbrowser # Para abrir links
 import re # Para expresiones regulares (parseo de hora)
+import sys # Necesario para sys._MEIPASS
+import os  # Necesario para path operations
+import urllib.parse
+
+
+def resource_path(relative_path):
+    """ Obtiene la ruta absoluta al recurso, funciona para desarrollo y para PyInstaller """
+    try:
+        # PyInstaller crea una carpeta temporal y almacena la ruta en _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Si no se está ejecutando desde PyInstaller, __file__ apunta al script actual
+        base_path = os.path.abspath(os.path.dirname(__file__))
+
+    return os.path.join(base_path, relative_path)
 
 class AudienciaApp:
     def __init__(self, root):
@@ -28,6 +44,7 @@ class AudienciaApp:
         self.cargar_eventos_fecha_actual()
         self.marcar_dias_calendario() # Marcar días con eventos al inicio
 
+
         # --- Iniciar Hilo de Recordatorios ---
         self.stop_event = threading.Event()
         self.hilo_recordatorios = threading.Thread(target=self.verificar_recordatorios_periodicamente, daemon=True)
@@ -40,6 +57,27 @@ class AudienciaApp:
         # --- Frame Principal ---
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
+
+# --- Configurar Imagen de Fondo ---
+        try:
+            # Construir ruta a la imagen usando la función helper
+            image_path = resource_path("assets/logoLegalito01.png") # Ajusta el nombre/extensión si es diferente
+            self.bg_image_pil = Image.open(image_path)
+            # Opcional: Redimensionar si es necesario (ej. a 850x650)
+            # self.bg_image_pil = self.bg_image_pil.resize((850, 650), Image.Resampling.LANCZOS)
+
+            self.bg_image = ImageTk.PhotoImage(self.bg_image_pil)
+
+            # Crear un Label para mostrar la imagen
+            bg_label = tk.Label(self.root, image=self.bg_image)
+            bg_label.place(x=0, y=0, relwidth=1, relheight=1) # Cubre toda la ventana
+            bg_label.lower() # Poner detrás de otros widgets
+
+        except FileNotFoundError:
+            print("Advertencia: No se encontró la imagen de fondo.")
+        except Exception as e:
+            print(f"Error al cargar la imagen de fondo: {e}")
+        # --- Fin Configurar Imagen de Fondo ---
 
         # --- Frame Izquierdo (Calendario y Botones) ---
         left_frame = ttk.Frame(main_frame)
@@ -132,6 +170,13 @@ class AudienciaApp:
         self.open_link_btn.pack(side=tk.RIGHT)
 
 
+        self.share_btn = ttk.Button(edit_delete_frame, text="Compartir", command=self.mostrar_menu_compartir, state=tk.DISABLED)
+        self.share_btn.pack(side=tk.LEFT, padx=(5, 0)) # Ponerlo a la izquierda, después de eliminar
+
+        self.open_link_btn = ttk.Button(edit_delete_frame, text="Abrir Link", command=self.abrir_link_seleccionado, state=tk.DISABLED)
+        self.open_link_btn.pack(side=tk.RIGHT) # Mantenemos Abrir Link a la derecha
+
+
     def marcar_dias_calendario(self):
         """Obtiene fechas con eventos y las marca en el widget Calendar."""
         # Limpiar marcas anteriores para evitar duplicados o marcas incorrectas
@@ -149,7 +194,7 @@ class AudienciaApp:
             except ValueError:
                 print(f"Error al parsear fecha '{fecha_str}' para marcar calendario.")
             except Exception as e:
-                 print(f"Error al crear evento de calendario para {fecha_str}: {e}")
+                print(f"Error al crear evento de calendario para {fecha_str}: {e}")
 
 
     def actualizar_lista_eventos(self, event=None):
@@ -238,22 +283,82 @@ class AudienciaApp:
     def habilitar_botones_edicion(self):
         self.edit_btn.config(state=tk.NORMAL)
         self.delete_btn.config(state=tk.NORMAL)
-        # Habilitar abrir link solo si hay un link válido en la DB para este ID
-        if self.evento_seleccionado_id:
-             # Consultar DB para el link real, no depender de la vista truncada
-             evento = db.obtener_evento_por_id(self.evento_seleccionado_id)
-             if evento and evento['link']:
-                 self.open_link_btn.config(state=tk.NORMAL)
-             else:
-                 self.open_link_btn.config(state=tk.DISABLED)
-        else:
-             self.open_link_btn.config(state=tk.DISABLED)
+        self.share_btn.config(state=tk.NORMAL) # <-- Habilitar Compartir
 
+    # Habilitar abrir link solo si hay un link válido en la DB para este ID
+        if self.evento_seleccionado_id:
+            # Consultar DB para el link real, no depender de la vista truncada
+            evento = db.obtener_evento_por_id(self.evento_seleccionado_id)
+            if evento and evento['link']:
+                self.open_link_btn.config(state=tk.NORMAL)
+            else:
+                self.open_link_btn.config(state=tk.DISABLED)
+        else:
+            self.open_link_btn.config(state=tk.DISABLED)
+
+    def _formatear_texto_para_compartir(self, evento):
+        """Formatea los detalles del evento en un texto legible para compartir."""
+        if not evento:
+            return "Error: No se encontró el evento."
+
+        texto = f"Detalles de la Audiencia:\n"
+        texto += f"-------------------------\n"
+        texto += f"Fecha: {evento.get('fecha', 'N/A')}\n"
+        if evento.get('hora'):
+            texto += f"Hora: {evento['hora']}\n"
+        texto += f"Descripción: {evento.get('descripcion', 'N/A')}\n"
+        if evento.get('link'):
+            texto += f"Link: {evento['link']}\n"
+        texto += f"-------------------------"
+        return texto
+
+def _compartir_por_email(self):
+    """Prepara y abre el cliente de email con los detalles del evento."""
+    if not self.evento_seleccionado_id: return
+    evento = db.obtener_evento_por_id(self.evento_seleccionado_id)
+    if not evento: return
+
+    asunto = f"Detalles Audiencia: {evento.get('fecha', '')} - {evento.get('descripcion', 'Evento')[:30]}"
+    cuerpo = self._formatear_texto_para_compartir(evento)
+
+    # Codificar para URL
+    asunto_codificado = urllib.parse.quote(asunto)
+    cuerpo_codificado = urllib.parse.quote(cuerpo)
+
+    # Crear URL mailto: (sin destinatario específico)
+    mailto_url = f"mailto:?subject={asunto_codificado}&body={cuerpo_codificado}"
+
+    try:
+        print(f"Abriendo URL de email: {mailto_url}")
+        webbrowser.open(mailto_url)
+    except Exception as e:
+        messagebox.showerror("Error", f"No se pudo abrir el cliente de correo:\n{e}")
+
+def _compartir_por_whatsapp(self):
+    """Prepara y abre WhatsApp Web/Desktop con los detalles del evento."""
+    if not self.evento_seleccionado_id: return
+    evento = db.obtener_evento_por_id(self.evento_seleccionado_id)
+    if not evento: return
+
+    texto = self._formatear_texto_para_compartir(evento)
+    texto_codificado = urllib.parse.quote(texto)
+
+    # Crear URL de WhatsApp
+    whatsapp_url = f"https://wa.me/?text={texto_codificado}"
+
+    # Alternativa: whatsapp_url = f"https://api.whatsapp.com/send?text={texto_codificado}"
+
+    try:
+        print(f"Abriendo URL de WhatsApp: {whatsapp_url}")
+        webbrowser.open(whatsapp_url)
+    except Exception as e:
+        messagebox.showerror("Error", f"No se pudo abrir WhatsApp:\n{e}")
 
     def deshabilitar_botones_edicion(self):
         self.edit_btn.config(state=tk.DISABLED)
         self.delete_btn.config(state=tk.DISABLED)
         self.open_link_btn.config(state=tk.DISABLED)
+        self.share_btn.config(state=tk.DISABLED) # <-- Deshabilitar Compartir
 
     def abrir_link_seleccionado(self, event=None):
         if not self.evento_seleccionado_id:
@@ -270,8 +375,32 @@ class AudienciaApp:
             except Exception as e:
                 messagebox.showerror("Error", f"No se pudo abrir el link:\n{e}")
         else:
-             messagebox.showinfo("Información", "Este evento no tiene un link asociado o no se pudo encontrar.")
+            messagebox.showinfo("Información", "Este evento no tiene un link asociado o no se pudo encontrar.")
 
+# Añade esta función a la clase AudienciaApp
+
+    def mostrar_menu_compartir(self):
+        """Muestra un menú emergente con opciones para compartir."""
+        if not self.evento_seleccionado_id:
+            messagebox.showwarning("Advertencia", "Selecciona una audiencia para compartir.")
+            return
+
+    # Crear el menú
+        menu_compartir = tk.Menu(self.root, tearoff=0)
+        menu_compartir.add_command(label="Compartir por Email", command=self._compartir_por_email)
+        menu_compartir.add_command(label="Compartir por WhatsApp", command=self._compartir_por_whatsapp)
+
+    # Obtener coordenadas del botón para mostrar el menú cerca de él
+        share_button_widget = self.share_btn # Acceder al widget del botón
+        x = share_button_widget.winfo_rootx()
+        y = share_button_widget.winfo_rooty() + share_button_widget.winfo_height()
+
+    # Mostrar el menú en las coordenadas calculadas
+        try:
+            menu_compartir.tk_popup(x, y)
+        finally:
+        # Asegurarse de que el menú se maneje correctamente
+            menu_compartir.grab_release()
 
     def abrir_dialogo_evento(self, evento_id=None):
         """Abre una ventana Toplevel para agregar o editar un evento."""
